@@ -28,7 +28,6 @@ def fetch_comandas_abertas():
     res = supabase.table("comandas").select("*").eq("status", "Aberta").execute()
     return pd.DataFrame(res.data)
 
-# NOVA FUNÇÃO: Buscar itens de uma comanda específica
 def fetch_itens_comanda(comanda_id):
     res = supabase.table("comanda_itens").select("quantidade, preco_unitario, produtos(nome)").eq("comanda_id", comanda_id).execute()
     
@@ -42,7 +41,6 @@ def fetch_itens_comanda(comanda_id):
         })
     return pd.DataFrame(itens_formatados)
 
-# NOVA FUNÇÃO: Gerar o PDF com a Identidade Visual
 def gerar_pdf_comanda(comanda_id, mesa, total, data_fechamento, df_itens):
     pdf = FPDF()
     pdf.add_page()
@@ -52,16 +50,15 @@ def gerar_pdf_comanda(comanda_id, mesa, total, data_fechamento, df_itens):
     pdf.rect(0, 0, 210, 40, 'F')
     
     pdf.set_font("helvetica", "B", 24)
-    pdf.set_text_color(255, 255, 255) # Texto Branco
+    pdf.set_text_color(255, 255, 255)
     pdf.cell(0, 15, "LA VILA BISTRO", align="C", ln=1)
     
     pdf.set_font("helvetica", "", 12)
-    # Formatar data de forma simples (cortando os milissegundos)
     data_formatada = str(data_fechamento)[:16].replace("T", " ") if data_fechamento else "Data não registrada"
     pdf.cell(0, 10, f"Comanda #{comanda_id} | Mesa {mesa} | Data: {data_formatada}", align="C", ln=1)
     
     pdf.set_y(50)
-    pdf.set_text_color(10, 37, 64) # Texto Escuro para a tabela
+    pdf.set_text_color(10, 37, 64)
     
     # Cabeçalho da Tabela
     pdf.set_font("helvetica", "B", 10)
@@ -73,7 +70,6 @@ def gerar_pdf_comanda(comanda_id, mesa, total, data_fechamento, df_itens):
     # Linhas da Tabela
     pdf.set_font("helvetica", "", 10)
     for index, row in df_itens.iterrows():
-        # Limita o nome do produto para caber na célula
         nome_prod = str(row["Produto"])[:50]
         pdf.cell(110, 10, nome_prod, border=1)
         pdf.cell(20, 10, str(row["Qtd"]), border=1, align="C")
@@ -89,7 +85,6 @@ def gerar_pdf_comanda(comanda_id, mesa, total, data_fechamento, df_itens):
     pdf.set_font("helvetica", "I", 10)
     pdf.cell(0, 20, "Obrigado por escolher o La Vila Bistro!", align="C", ln=1)
     
-    # Retorna os bytes do PDF para o Streamlit
     return bytes(pdf.output())
 
 # --- Interface Gráfica ---
@@ -121,7 +116,20 @@ with tab_comandas:
         if not df_comandas.empty:
             for index, comanda in df_comandas.iterrows():
                 with st.expander(f"Mesa {comanda['mesa']} - Total Parcial: R$ {comanda['total']:.2f}"):
-                    # Adicionar itens
+                    
+                    # --- NOVIDADE: Mostrar os itens já consumidos na mesa ---
+                    df_itens_aberta = fetch_itens_comanda(comanda['id'])
+                    if not df_itens_aberta.empty:
+                        st.markdown("**Itens Consumidos:**")
+                        st.dataframe(df_itens_aberta, use_container_width=True, hide_index=True)
+                        st.info(f"**Total Parcial Acumulado:** R$ {comanda['total']:.2f}")
+                    else:
+                        st.info("Nenhum item lançado nesta mesa ainda.")
+                        
+                    st.divider()
+
+                    # Formulário de Adição de Itens
+                    st.markdown("**Lançar Novo Item:**")
                     produtos_df = fetch_produtos()
                     produto_selecionado = st.selectbox("Adicionar Produto", produtos_df['nome'], key=f"prod_{comanda['id']}")
                     qtd = st.number_input("Quantidade", min_value=1, step=1, key=f"qtd_{comanda['id']}")
@@ -195,12 +203,11 @@ with tab_estoque:
             st.success("Estoque atualizado!")
             st.rerun()
 
-# --- ABA 4: CAIXA --- (EVOLUÍDA COM EXIBIÇÃO DE ITENS E PDF)
+# --- ABA 4: CAIXA ---
 with tab_caixa:
     st.header("Controle de Caixa")
     st.write("Visão detalhada das comandas fechadas e emissão de recibos.")
     
-    # Busca comandas fechadas ordenando da mais recente para a mais antiga
     res_caixa = supabase.table("comandas").select("*").eq("status", "Fechada").order("data_fechamento", desc=True).execute()
     df_caixa = pd.DataFrame(res_caixa.data)
     
@@ -215,16 +222,13 @@ with tab_caixa:
             
             with st.expander(f"🧾 Comanda #{row['id']} - Mesa {row['mesa']} | Total: R$ {row['total']:.2f} | {data_str}"):
                 
-                # Busca os itens vinculados a esta comanda específica
                 df_itens_comanda = fetch_itens_comanda(row['id'])
                 
                 if not df_itens_comanda.empty:
                     st.dataframe(df_itens_comanda, use_container_width=True, hide_index=True)
                     
-                    # Gerar o arquivo PDF na memória
                     pdf_bytes = gerar_pdf_comanda(row['id'], row['mesa'], row['total'], row['data_fechamento'], df_itens_comanda)
                     
-                    # Botão para download do PDF
                     st.download_button(
                         label="📄 Baixar Recibo em PDF",
                         data=pdf_bytes,
