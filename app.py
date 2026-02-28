@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
 from fpdf import FPDF
+import plotly.express as px
+from datetime import datetime, timedelta
 
 # Configuração da Página
 st.set_page_config(page_title="La Vila Bistrô - Sistema", page_icon="🍽️", layout="wide")
@@ -19,7 +21,7 @@ except Exception as e:
     st.error("Erro ao conectar com o banco de dados. Verifique as credenciais no secrets.")
     st.stop()
 
-# --- Funções de Banco de Dados ---
+# --- Funções de Banco de Dados e BI ---
 def fetch_produtos():
     res = supabase.table("produtos").select("*").order("categoria").execute()
     return pd.DataFrame(res.data)
@@ -30,7 +32,6 @@ def fetch_comandas_abertas():
 
 def fetch_itens_comanda(comanda_id):
     res = supabase.table("comanda_itens").select("quantidade, preco_unitario, produtos(nome)").eq("comanda_id", comanda_id).execute()
-    
     itens_formatados = []
     for item in res.data:
         itens_formatados.append({
@@ -41,50 +42,57 @@ def fetch_itens_comanda(comanda_id):
         })
     return pd.DataFrame(itens_formatados)
 
+# Função Preditiva de Consumo Diário
+def get_consumo_preditivo():
+    res_c = supabase.table("comandas").select("id, data_fechamento").eq("status", "Fechada").execute()
+    df_c = pd.DataFrame(res_c.data)
+    if df_c.empty: return pd.DataFrame()
+    
+    res_i = supabase.table("comanda_itens").select("comanda_id, quantidade, produto_id").execute()
+    df_i = pd.DataFrame(res_i.data)
+    if df_i.empty: return pd.DataFrame()
+    
+    df_merged = pd.merge(df_i, df_c, left_on='comanda_id', right_on='id')
+    df_merged['data_fechamento'] = pd.to_datetime(df_merged['data_fechamento'])
+    
+    # Calcula quantos dias o bistrô já operou
+    dias_operacao = (df_merged['data_fechamento'].max().date() - df_merged['data_fechamento'].min().date()).days
+    if dias_operacao <= 0: dias_operacao = 1 # Proteção matemática inicial
+    
+    vendas = df_merged.groupby('produto_id')['quantidade'].sum().reset_index()
+    vendas['consumo_diario_medio'] = vendas['quantidade'] / dias_operacao
+    return vendas
+
 def gerar_pdf_comanda(comanda_id, mesa, total, data_fechamento, df_itens):
     pdf = FPDF()
     pdf.add_page()
-    
-    # Cabeçalho - Identidade Visual (Azul #1D528A)
     pdf.set_fill_color(29, 82, 138)
     pdf.rect(0, 0, 210, 40, 'F')
-    
     pdf.set_font("helvetica", "B", 24)
     pdf.set_text_color(255, 255, 255)
     pdf.cell(0, 15, "LA VILA BISTRO", align="C", ln=1)
-    
     pdf.set_font("helvetica", "", 12)
     data_formatada = str(data_fechamento)[:16].replace("T", " ") if data_fechamento else "Data não registrada"
     pdf.cell(0, 10, f"Comanda #{comanda_id} | Mesa {mesa} | Data: {data_formatada}", align="C", ln=1)
-    
     pdf.set_y(50)
     pdf.set_text_color(10, 37, 64)
-    
-    # Cabeçalho da Tabela
     pdf.set_font("helvetica", "B", 10)
     pdf.cell(110, 10, "Produto", border=1)
     pdf.cell(20, 10, "Qtd", border=1, align="C")
     pdf.cell(30, 10, "V. Unit (R$)", border=1, align="C")
     pdf.cell(30, 10, "Subtotal (R$)", border=1, align="C", ln=1)
-    
-    # Linhas da Tabela
     pdf.set_font("helvetica", "", 10)
     for index, row in df_itens.iterrows():
-        nome_prod = str(row["Produto"])[:50]
-        pdf.cell(110, 10, nome_prod, border=1)
+        pdf.cell(110, 10, str(row["Produto"])[:50], border=1)
         pdf.cell(20, 10, str(row["Qtd"]), border=1, align="C")
         pdf.cell(30, 10, f"{row['Preço Unitário']:.2f}", border=1, align="C")
         pdf.cell(30, 10, f"{row['Subtotal']:.2f}", border=1, align="C", ln=1)
-    
-    # Rodapé com Total
     pdf.ln(5)
     pdf.set_font("helvetica", "B", 14)
     pdf.cell(160, 15, "TOTAL GERAL:", align="R")
     pdf.cell(30, 15, f"R$ {total:.2f}", align="R", ln=1)
-    
     pdf.set_font("helvetica", "I", 10)
     pdf.cell(0, 20, "Obrigado por escolher o La Vila Bistro!", align="C", ln=1)
-    
     return bytes(pdf.output())
 
 # --- Interface Gráfica ---
@@ -95,10 +103,9 @@ tab_comandas, tab_cardapio, tab_estoque, tab_caixa = st.tabs([
     "📝 Comandas", "📖 Cardápio", "📦 Estoque", "💰 Caixa"
 ])
 
-# --- ABA 1: COMANDAS ---
+# --- ABA 1: COMANDAS --- (Intocada)
 with tab_comandas:
     st.header("Gestão de Comandas")
-    
     col1, col2 = st.columns([1, 2])
     
     with col1:
@@ -116,7 +123,6 @@ with tab_comandas:
         if not df_comandas.empty:
             for index, comanda in df_comandas.iterrows():
                 with st.expander(f"Mesa {comanda['mesa']} - Total Parcial: R$ {comanda['total']:.2f}"):
-                    
                     df_itens_aberta = fetch_itens_comanda(comanda['id'])
                     if not df_itens_aberta.empty:
                         st.markdown("**Itens Consumidos:**")
@@ -126,7 +132,6 @@ with tab_comandas:
                         st.info("Nenhum item lançado nesta mesa ainda.")
                         
                     st.divider()
-
                     st.markdown("**Lançar Novo Item:**")
                     produtos_df = fetch_produtos()
                     produto_selecionado = st.selectbox("Adicionar Produto", produtos_df['nome'], key=f"prod_{comanda['id']}")
@@ -134,33 +139,26 @@ with tab_comandas:
                     
                     if st.button("Lançar Item", key=f"btn_add_{comanda['id']}"):
                         prod_info = produtos_df[produtos_df['nome'] == produto_selecionado].iloc[0]
-                        
                         supabase.table("comanda_itens").insert({
-                            "comanda_id": comanda['id'],
-                            "produto_id": int(prod_info['id']),
-                            "quantidade": qtd,
-                            "preco_unitario": float(prod_info['preco'])
+                            "comanda_id": comanda['id'], "produto_id": int(prod_info['id']),
+                            "quantidade": qtd, "preco_unitario": float(prod_info['preco'])
                         }).execute()
                         
                         novo_total = float(comanda['total']) + (float(prod_info['preco']) * qtd)
                         novo_estoque = int(prod_info['estoque']) - qtd
-                        
                         supabase.table("comandas").update({"total": novo_total}).eq("id", comanda['id']).execute()
                         supabase.table("produtos").update({"estoque": novo_estoque}).eq("id", int(prod_info['id'])).execute()
                         st.rerun()
                     
                     st.divider()
                     if st.button("Fechar Comanda (Pagamento)", key=f"btn_fechar_{comanda['id']}"):
-                        supabase.table("comandas").update({
-                            "status": "Fechada", 
-                            "data_fechamento": "now()"
-                        }).eq("id", comanda['id']).execute()
+                        supabase.table("comandas").update({"status": "Fechada", "data_fechamento": "now()"}).eq("id", comanda['id']).execute()
                         st.success("Comanda fechada!")
                         st.rerun()
         else:
             st.info("Nenhuma comanda aberta no momento.")
 
-# --- ABA 2: CARDÁPIO ---
+# --- ABA 2: CARDÁPIO --- (Intocada)
 with tab_cardapio:
     st.header("Gerenciamento do Cardápio")
     df_produtos = fetch_produtos()
@@ -170,88 +168,143 @@ with tab_cardapio:
         nome_novo = st.text_input("Nome do Produto")
         preco_novo = st.number_input("Preço (R$)", min_value=0.0, step=0.1, format="%.2f")
         if st.button("Salvar Produto"):
-            supabase.table("produtos").insert({
-                "categoria": cat_nova, "nome": nome_novo, "preco": preco_novo
-            }).execute()
+            supabase.table("produtos").insert({"categoria": cat_nova, "nome": nome_novo, "preco": preco_novo}).execute()
             st.success("Produto adicionado!")
             st.rerun()
 
     st.subheader("Itens Cadastrados")
     st.dataframe(df_produtos[['categoria', 'nome', 'preco']], use_container_width=True)
 
-# --- ABA 3: ESTOQUE ---
+# --- ABA 3: ESTOQUE E PREVISÃO --- (Evoluída)
 with tab_estoque:
-    st.header("Controle de Estoque")
-    df_estoque = fetch_produtos()
+    st.header("Controle de Estoque e Análise Preditiva")
     
-    col_est1, col_est2 = st.columns([2, 1])
+    aba_movimentacao, aba_preditiva = st.tabs(["📦 Movimentar Estoque", "🔮 Previsão de Ruptura (IA)"])
     
-    with col_est1:
-        st.dataframe(df_estoque[['nome', 'estoque']], use_container_width=True)
-        
-    with col_est2:
-        st.subheader("Movimentar Estoque")
-        prod_est = st.selectbox("Selecione o Produto", df_estoque['nome'])
-        
-        # --- EVOLUÇÃO: Opção de Adicionar ou Subtrair ---
-        tipo_movimento = st.radio("Tipo de Movimentação", ["Entrada (Adicionar)", "Saída/Baixa (Subtrair)"], horizontal=True)
-        qtd_movimento = st.number_input("Quantidade", min_value=1, step=1)
-        
-        if st.button("Atualizar Saldo"):
-            prod_info = df_estoque[df_estoque['nome'] == prod_est].iloc[0]
-            prod_id = prod_info['id']
-            estoque_atual = int(prod_info['estoque'])
+    with aba_movimentacao:
+        df_estoque = fetch_produtos()
+        col_est1, col_est2 = st.columns([2, 1])
+        with col_est1:
+            st.dataframe(df_estoque[['nome', 'estoque']], use_container_width=True)
+        with col_est2:
+            st.subheader("Movimentar Estoque")
+            prod_est = st.selectbox("Selecione o Produto", df_estoque['nome'])
+            tipo_movimento = st.radio("Tipo de Movimentação", ["Entrada (Adicionar)", "Saída/Baixa (Subtrair)"], horizontal=True)
+            qtd_movimento = st.number_input("Quantidade", min_value=1, step=1)
             
-            # Aplica a matemática dependendo do que foi selecionado
-            if "Entrada" in tipo_movimento:
-                novo_saldo_calculado = estoque_atual + qtd_movimento
-            else:
-                novo_saldo_calculado = estoque_atual - qtd_movimento
+            if st.button("Atualizar Saldo"):
+                prod_info = df_estoque[df_estoque['nome'] == prod_est].iloc[0]
+                prod_id = prod_info['id']
+                estoque_atual = int(prod_info['estoque'])
                 
-            # Trava de segurança para não deixar o estoque ficar negativo manualmente
-            if novo_saldo_calculado < 0:
-                st.error(f"Erro: Você está tentando dar baixa em {qtd_movimento} unidades, mas só existem {estoque_atual} no sistema.")
-            else:
-                supabase.table("produtos").update({"estoque": novo_saldo_calculado}).eq("id", int(prod_id)).execute()
-                st.success(f"Estoque atualizado com sucesso! Novo saldo: {novo_saldo_calculado} unidades.")
-                st.rerun()
+                if "Entrada" in tipo_movimento:
+                    novo_saldo_calculado = estoque_atual + qtd_movimento
+                else:
+                    novo_saldo_calculado = estoque_atual - qtd_movimento
+                    
+                if novo_saldo_calculado < 0:
+                    st.error(f"Erro: Tentativa de baixa de {qtd_movimento}, mas só existem {estoque_atual}.")
+                else:
+                    supabase.table("produtos").update({"estoque": novo_saldo_calculado}).eq("id", int(prod_id)).execute()
+                    st.success("Estoque atualizado!")
+                    st.rerun()
 
-# --- ABA 4: CAIXA ---
+    with aba_preditiva:
+        st.write("Cálculo inteligente de autonomia com base no histórico de vendas reais.")
+        df_preditivo = get_consumo_preditivo()
+        
+        if not df_preditivo.empty:
+            df_estoque_atual = fetch_produtos()
+            df_analise = pd.merge(df_estoque_atual, df_preditivo, left_on='id', right_on='produto_id', how='left')
+            df_analise['consumo_diario_medio'] = df_analise['consumo_diario_medio'].fillna(0)
+            
+            # Calcula dias restantes
+            df_analise['dias_autonomia'] = df_analise.apply(
+                lambda row: int(row['estoque'] / row['consumo_diario_medio']) if row['consumo_diario_medio'] > 0 else float('inf'), axis=1
+            )
+            
+            # Alertas Críticos (Menos de 7 dias de estoque)
+            criticos = df_analise[(df_analise['dias_autonomia'] <= 7) & (df_analise['dias_autonomia'] >= 0)].sort_values('dias_autonomia')
+            if not criticos.empty:
+                st.error("🚨 **Atenção: Os produtos abaixo podem acabar nos próximos 7 dias!**")
+                st.dataframe(criticos[['nome', 'estoque', 'consumo_diario_medio', 'dias_autonomia']], use_container_width=True, hide_index=True)
+            else:
+                st.success("✅ O estoque de todos os produtos está saudável no momento.")
+                
+            fig_est = px.bar(df_analise[df_analise['consumo_diario_medio'] > 0], x='nome', y='dias_autonomia', 
+                             title="Dias Estimados de Estoque Restante por Produto", 
+                             labels={'nome': 'Produto', 'dias_autonomia': 'Dias Restantes'},
+                             color='dias_autonomia', color_continuous_scale='RdYlGn')
+            st.plotly_chart(fig_est, use_container_width=True)
+        else:
+            st.info("O sistema precisa de vendas finalizadas para calcular o consumo preditivo.")
+
+# --- ABA 4: CAIXA E DASHBOARDS --- (Evoluída)
 with tab_caixa:
-    st.header("Controle de Caixa")
-    st.write("Visão detalhada das comandas fechadas e emissão de recibos.")
+    st.header("Inteligência Financeira e Caixa")
+    
+    aba_dash, aba_historico = st.tabs(["📊 Dashboards de Desempenho", "🧾 Histórico de Recebimentos"])
     
     res_caixa = supabase.table("comandas").select("*").eq("status", "Fechada").order("data_fechamento", desc=True).execute()
     df_caixa = pd.DataFrame(res_caixa.data)
-    
-    if not df_caixa.empty:
-        faturamento_total = df_caixa['total'].sum()
-        st.metric(label="Faturamento Total Acumulado", value=f"R$ {faturamento_total:.2f}")
-        st.divider()
-        
-        st.subheader("Histórico de Comandas Fechadas")
-        for index, row in df_caixa.iterrows():
-            data_str = str(row['data_fechamento'])[:16].replace("T", " ") if row['data_fechamento'] else ""
+
+    with aba_dash:
+        if not df_caixa.empty:
+            df_caixa['data_fechamento'] = pd.to_datetime(df_caixa['data_fechamento'])
+            hoje = datetime.now().date()
             
-            with st.expander(f"🧾 Comanda #{row['id']} - Mesa {row['mesa']} | Total: R$ {row['total']:.2f} | {data_str}"):
+            # Filtros de Periodicidade
+            fat_hoje = df_caixa[df_caixa['data_fechamento'].dt.date == hoje]['total'].sum()
+            fat_semana = df_caixa[df_caixa['data_fechamento'].dt.isocalendar().week == hoje.isocalendar()[1]]['total'].sum()
+            fat_mes = df_caixa[df_caixa['data_fechamento'].dt.month == hoje.month]['total'].sum()
+            
+            col_d1, col_d2, col_d3 = st.columns(3)
+            col_d1.metric("Faturamento Hoje", f"R$ {fat_hoje:.2f}")
+            col_d2.metric("Faturamento Semana", f"R$ {fat_semana:.2f}")
+            col_d3.metric("Faturamento Mês", f"R$ {fat_mes:.2f}")
+            
+            st.divider()
+            st.subheader("Classificação de Produtos (Curva ABC)")
+            
+            # Busca todos os itens vendidos
+            res_todos_itens = supabase.table("comanda_itens").select("quantidade, produtos(nome)").execute()
+            df_t = pd.DataFrame(res_todos_itens.data)
+            
+            if not df_t.empty:
+                df_t['produto'] = df_t['produtos'].apply(lambda x: x['nome'] if isinstance(x, dict) else x)
+                vendas_agrup = df_t.groupby('produto')['quantidade'].sum().reset_index().sort_values('quantidade', ascending=False)
                 
-                df_itens_comanda = fetch_itens_comanda(row['id'])
+                # Gráfico
+                fig = px.bar(vendas_agrup, x='produto', y='quantidade', title="Volume Total Vendido por Produto", color='quantidade', color_continuous_scale='Blues')
+                st.plotly_chart(fig, use_container_width=True)
                 
-                if not df_itens_comanda.empty:
-                    st.dataframe(df_itens_comanda, use_container_width=True, hide_index=True)
-                    
-                    st.info(f"**Total da Comanda:** R$ {row['total']:.2f}")
-                    
-                    pdf_bytes = gerar_pdf_comanda(row['id'], row['mesa'], row['total'], row['data_fechamento'], df_itens_comanda)
-                    
-                    st.download_button(
-                        label="📄 Baixar Recibo em PDF",
-                        data=pdf_bytes,
-                        file_name=f"LaVilaBistro_Comanda_{row['id']}.pdf",
-                        mime="application/pdf",
-                        key=f"pdf_btn_{row['id']}"
-                    )
-                else:
-                    st.warning("Nenhum item registrado nesta comanda (comanda vazia).")
-    else:
-        st.info("Nenhuma comanda fechada até o momento.")
+                # Divisão Simples ABC
+                terco = max(1, len(vendas_agrup) // 3)
+                alta = vendas_agrup.head(terco)['produto'].tolist()
+                baixa = vendas_agrup.tail(terco)['produto'].tolist()
+                media = vendas_agrup.iloc[terco:-terco]['produto'].tolist() if len(vendas_agrup) > 2 else []
+                
+                st.success(f"🔥 **Mais Vendidos (Alta Saída):** {', '.join(alta)}")
+                if media: st.info(f"⚖️ **Consumo Mediano:** {', '.join(media)}")
+                st.warning(f"❄️ **Menos Vendidos (Baixa Saída):** {', '.join(baixa)}")
+        else:
+            st.info("Nenhum dado financeiro para gerar painéis.")
+
+    with aba_historico:
+        st.write("Visão detalhada das comandas fechadas e emissão de recibos.")
+        if not df_caixa.empty:
+            for index, row in df_caixa.iterrows():
+                data_str = str(row['data_fechamento'])[:16].replace("T", " ") if row['data_fechamento'] else ""
+                
+                with st.expander(f"🧾 Comanda #{row['id']} - Mesa {row['mesa']} | Total: R$ {row['total']:.2f} | {data_str}"):
+                    df_itens_comanda = fetch_itens_comanda(row['id'])
+                    if not df_itens_comanda.empty:
+                        st.dataframe(df_itens_comanda, use_container_width=True, hide_index=True)
+                        st.info(f"**Total da Comanda:** R$ {row['total']:.2f}")
+                        
+                        pdf_bytes = gerar_pdf_comanda(row['id'], row['mesa'], row['total'], row['data_fechamento'], df_itens_comanda)
+                        st.download_button(label="📄 Baixar Recibo em PDF", data=pdf_bytes, file_name=f"LaVilaBistro_Comanda_{row['id']}.pdf", mime="application/pdf", key=f"pdf_btn_{row['id']}")
+                    else:
+                        st.warning("Comanda vazia.")
+        else:
+            st.info("Nenhuma comanda fechada até o momento.")
