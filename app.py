@@ -190,24 +190,31 @@ with tab_estoque:
         st.dataframe(df_estoque[['nome', 'estoque']], use_container_width=True)
         
     with col_est2:
-        st.subheader("Adicionar ao Estoque")
+        st.subheader("Movimentar Estoque")
         prod_est = st.selectbox("Selecione o Produto", df_estoque['nome'])
         
-        # --- EVOLUÇÃO: O usuário agora digita apenas a quantidade que está entrando ---
-        qtd_adicionar = st.number_input("Quantidade a Adicionar", min_value=1, step=1)
+        # --- EVOLUÇÃO: Opção de Adicionar ou Subtrair ---
+        tipo_movimento = st.radio("Tipo de Movimentação", ["Entrada (Adicionar)", "Saída/Baixa (Subtrair)"], horizontal=True)
+        qtd_movimento = st.number_input("Quantidade", min_value=1, step=1)
         
         if st.button("Atualizar Saldo"):
-            # Puxa a informação completa do produto selecionado
             prod_info = df_estoque[df_estoque['nome'] == prod_est].iloc[0]
             prod_id = prod_info['id']
-            estoque_atual = prod_info['estoque']
+            estoque_atual = int(prod_info['estoque'])
             
-            # Soma o estoque que já existe no banco com a nova quantidade digitada
-            novo_saldo_calculado = int(estoque_atual) + qtd_adicionar
-            
-            supabase.table("produtos").update({"estoque": novo_saldo_calculado}).eq("id", int(prod_id)).execute()
-            st.success(f"Estoque atualizado! Novo saldo: {novo_saldo_calculado} unidades.")
-            st.rerun()
+            # Aplica a matemática dependendo do que foi selecionado
+            if "Entrada" in tipo_movimento:
+                novo_saldo_calculado = estoque_atual + qtd_movimento
+            else:
+                novo_saldo_calculado = estoque_atual - qtd_movimento
+                
+            # Trava de segurança para não deixar o estoque ficar negativo manualmente
+            if novo_saldo_calculado < 0:
+                st.error(f"Erro: Você está tentando dar baixa em {qtd_movimento} unidades, mas só existem {estoque_atual} no sistema.")
+            else:
+                supabase.table("produtos").update({"estoque": novo_saldo_calculado}).eq("id", int(prod_id)).execute()
+                st.success(f"Estoque atualizado com sucesso! Novo saldo: {novo_saldo_calculado} unidades.")
+                st.rerun()
 
 # --- ABA 4: CAIXA ---
 with tab_caixa:
