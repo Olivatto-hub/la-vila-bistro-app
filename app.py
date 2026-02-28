@@ -55,9 +55,8 @@ def get_consumo_preditivo():
     df_merged = pd.merge(df_i, df_c, left_on='comanda_id', right_on='id')
     df_merged['data_fechamento'] = pd.to_datetime(df_merged['data_fechamento'])
     
-    # Calcula quantos dias o bistrô já operou
     dias_operacao = (df_merged['data_fechamento'].max().date() - df_merged['data_fechamento'].min().date()).days
-    if dias_operacao <= 0: dias_operacao = 1 # Proteção matemática inicial
+    if dias_operacao <= 0: dias_operacao = 1 
     
     vendas = df_merged.groupby('produto_id')['quantidade'].sum().reset_index()
     vendas['consumo_diario_medio'] = vendas['quantidade'] / dias_operacao
@@ -103,7 +102,7 @@ tab_comandas, tab_cardapio, tab_estoque, tab_caixa = st.tabs([
     "📝 Comandas", "📖 Cardápio", "📦 Estoque", "💰 Caixa"
 ])
 
-# --- ABA 1: COMANDAS --- (Intocada)
+# --- ABA 1: COMANDAS ---
 with tab_comandas:
     st.header("Gestão de Comandas")
     col1, col2 = st.columns([1, 2])
@@ -158,7 +157,7 @@ with tab_comandas:
         else:
             st.info("Nenhuma comanda aberta no momento.")
 
-# --- ABA 2: CARDÁPIO --- (Intocada)
+# --- ABA 2: CARDÁPIO ---
 with tab_cardapio:
     st.header("Gerenciamento do Cardápio")
     df_produtos = fetch_produtos()
@@ -175,7 +174,7 @@ with tab_cardapio:
     st.subheader("Itens Cadastrados")
     st.dataframe(df_produtos[['categoria', 'nome', 'preco']], use_container_width=True)
 
-# --- ABA 3: ESTOQUE E PREVISÃO --- (Evoluída)
+# --- ABA 3: ESTOQUE E PREVISÃO ---
 with tab_estoque:
     st.header("Controle de Estoque e Análise Preditiva")
     
@@ -218,12 +217,10 @@ with tab_estoque:
             df_analise = pd.merge(df_estoque_atual, df_preditivo, left_on='id', right_on='produto_id', how='left')
             df_analise['consumo_diario_medio'] = df_analise['consumo_diario_medio'].fillna(0)
             
-            # Calcula dias restantes
             df_analise['dias_autonomia'] = df_analise.apply(
                 lambda row: int(row['estoque'] / row['consumo_diario_medio']) if row['consumo_diario_medio'] > 0 else float('inf'), axis=1
             )
             
-            # Alertas Críticos (Menos de 7 dias de estoque)
             criticos = df_analise[(df_analise['dias_autonomia'] <= 7) & (df_analise['dias_autonomia'] >= 0)].sort_values('dias_autonomia')
             if not criticos.empty:
                 st.error("🚨 **Atenção: Os produtos abaixo podem acabar nos próximos 7 dias!**")
@@ -239,7 +236,7 @@ with tab_estoque:
         else:
             st.info("O sistema precisa de vendas finalizadas para calcular o consumo preditivo.")
 
-# --- ABA 4: CAIXA E DASHBOARDS --- (Evoluída)
+# --- ABA 4: CAIXA E DASHBOARDS ---
 with tab_caixa:
     st.header("Inteligência Financeira e Caixa")
     
@@ -253,7 +250,6 @@ with tab_caixa:
             df_caixa['data_fechamento'] = pd.to_datetime(df_caixa['data_fechamento'])
             hoje = datetime.now().date()
             
-            # Filtros de Periodicidade
             fat_hoje = df_caixa[df_caixa['data_fechamento'].dt.date == hoje]['total'].sum()
             fat_semana = df_caixa[df_caixa['data_fechamento'].dt.isocalendar().week == hoje.isocalendar()[1]]['total'].sum()
             fat_mes = df_caixa[df_caixa['data_fechamento'].dt.month == hoje.month]['total'].sum()
@@ -264,15 +260,22 @@ with tab_caixa:
             col_d3.metric("Faturamento Mês", f"R$ {fat_mes:.2f}")
             
             st.divider()
-            st.subheader("Classificação de Produtos (Curva ABC)")
+            st.subheader("Classificação de Produtos (Curva ABC & Estoque Parado)")
             
-            # Busca todos os itens vendidos
             res_todos_itens = supabase.table("comanda_itens").select("quantidade, produtos(nome)").execute()
             df_t = pd.DataFrame(res_todos_itens.data)
+            
+            # Puxa todos os produtos cadastrados no cardápio
+            df_produtos_geral = fetch_produtos()
+            todos_produtos = df_produtos_geral['nome'].tolist()
             
             if not df_t.empty:
                 df_t['produto'] = df_t['produtos'].apply(lambda x: x['nome'] if isinstance(x, dict) else x)
                 vendas_agrup = df_t.groupby('produto')['quantidade'].sum().reset_index().sort_values('quantidade', ascending=False)
+                
+                # Identifica produtos vendidos vs produtos nunca vendidos
+                produtos_vendidos = vendas_agrup['produto'].tolist()
+                produtos_sem_saida = [p for p in todos_produtos if p not in produtos_vendidos]
                 
                 # Gráfico
                 fig = px.bar(vendas_agrup, x='produto', y='quantidade', title="Volume Total Vendido por Produto", color='quantidade', color_continuous_scale='Blues')
@@ -286,7 +289,13 @@ with tab_caixa:
                 
                 st.success(f"🔥 **Mais Vendidos (Alta Saída):** {', '.join(alta)}")
                 if media: st.info(f"⚖️ **Consumo Mediano:** {', '.join(media)}")
-                st.warning(f"❄️ **Menos Vendidos (Baixa Saída):** {', '.join(baixa)}")
+                st.warning(f"❄️ **Pouca Saída:** {', '.join(baixa)}")
+                
+                # --- NOVIDADE: Alerta de Produtos com ZERO vendas ---
+                if produtos_sem_saida:
+                    st.error(f"🚫 **Sem Saída (Zero Vendas):** {', '.join(produtos_sem_saida)}")
+                else:
+                    st.success("🎉 Excelente! Todos os produtos do cardápio já tiveram pelo menos uma venda registrada.")
         else:
             st.info("Nenhum dado financeiro para gerar painéis.")
 
