@@ -190,13 +190,23 @@ with tab_estoque:
         st.dataframe(df_estoque[['nome', 'estoque']], use_container_width=True)
         
     with col_est2:
-        st.subheader("Atualizar Estoque")
+        st.subheader("Adicionar ao Estoque")
         prod_est = st.selectbox("Selecione o Produto", df_estoque['nome'])
-        novo_saldo = st.number_input("Novo Saldo Total", min_value=0, step=1)
+        
+        # --- EVOLUÇÃO: O usuário agora digita apenas a quantidade que está entrando ---
+        qtd_adicionar = st.number_input("Quantidade a Adicionar", min_value=1, step=1)
+        
         if st.button("Atualizar Saldo"):
-            prod_id = df_estoque[df_estoque['nome'] == prod_est].iloc[0]['id']
-            supabase.table("produtos").update({"estoque": novo_saldo}).eq("id", int(prod_id)).execute()
-            st.success("Estoque atualizado!")
+            # Puxa a informação completa do produto selecionado
+            prod_info = df_estoque[df_estoque['nome'] == prod_est].iloc[0]
+            prod_id = prod_info['id']
+            estoque_atual = prod_info['estoque']
+            
+            # Soma o estoque que já existe no banco com a nova quantidade digitada
+            novo_saldo_calculado = int(estoque_atual) + qtd_adicionar
+            
+            supabase.table("produtos").update({"estoque": novo_saldo_calculado}).eq("id", int(prod_id)).execute()
+            st.success(f"Estoque atualizado! Novo saldo: {novo_saldo_calculado} unidades.")
             st.rerun()
 
 # --- ABA 4: CAIXA ---
@@ -223,7 +233,6 @@ with tab_caixa:
                 if not df_itens_comanda.empty:
                     st.dataframe(df_itens_comanda, use_container_width=True, hide_index=True)
                     
-                    # --- NOVIDADE: Adicionado o destaque visual do Total da Comanda Fechada ---
                     st.info(f"**Total da Comanda:** R$ {row['total']:.2f}")
                     
                     pdf_bytes = gerar_pdf_comanda(row['id'], row['mesa'], row['total'], row['data_fechamento'], df_itens_comanda)
