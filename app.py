@@ -117,7 +117,6 @@ with tab_comandas:
             for index, comanda in df_comandas.iterrows():
                 with st.expander(f"Mesa {comanda['mesa']} - Total Parcial: R$ {comanda['total']:.2f}"):
                     
-                    # --- NOVIDADE: Mostrar os itens já consumidos na mesa ---
                     df_itens_aberta = fetch_itens_comanda(comanda['id'])
                     if not df_itens_aberta.empty:
                         st.markdown("**Itens Consumidos:**")
@@ -128,7 +127,6 @@ with tab_comandas:
                         
                     st.divider()
 
-                    # Formulário de Adição de Itens
                     st.markdown("**Lançar Novo Item:**")
                     produtos_df = fetch_produtos()
                     produto_selecionado = st.selectbox("Adicionar Produto", produtos_df['nome'], key=f"prod_{comanda['id']}")
@@ -137,7 +135,6 @@ with tab_comandas:
                     if st.button("Lançar Item", key=f"btn_add_{comanda['id']}"):
                         prod_info = produtos_df[produtos_df['nome'] == produto_selecionado].iloc[0]
                         
-                        # Inserir item
                         supabase.table("comanda_itens").insert({
                             "comanda_id": comanda['id'],
                             "produto_id": int(prod_info['id']),
@@ -145,7 +142,6 @@ with tab_comandas:
                             "preco_unitario": float(prod_info['preco'])
                         }).execute()
                         
-                        # Atualizar total da comanda e baixar estoque
                         novo_total = float(comanda['total']) + (float(prod_info['preco']) * qtd)
                         novo_estoque = int(prod_info['estoque']) - qtd
                         
@@ -226,6 +222,9 @@ with tab_caixa:
                 
                 if not df_itens_comanda.empty:
                     st.dataframe(df_itens_comanda, use_container_width=True, hide_index=True)
+                    
+                    # --- NOVIDADE: Adicionado o destaque visual do Total da Comanda Fechada ---
+                    st.info(f"**Total da Comanda:** R$ {row['total']:.2f}")
                     
                     pdf_bytes = gerar_pdf_comanda(row['id'], row['mesa'], row['total'], row['data_fechamento'], df_itens_comanda)
                     
