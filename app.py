@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
+from fpdf import FPDF
 
 # Configuração da Página
 st.set_page_config(page_title="La Vila Bistrô - Sistema", page_icon="🍽️", layout="wide")
@@ -26,6 +27,70 @@ def fetch_produtos():
 def fetch_comandas_abertas():
     res = supabase.table("comandas").select("*").eq("status", "Aberta").execute()
     return pd.DataFrame(res.data)
+
+# NOVA FUNÇÃO: Buscar itens de uma comanda específica
+def fetch_itens_comanda(comanda_id):
+    res = supabase.table("comanda_itens").select("quantidade, preco_unitario, produtos(nome)").eq("comanda_id", comanda_id).execute()
+    
+    itens_formatados = []
+    for item in res.data:
+        itens_formatados.append({
+            "Produto": item["produtos"]["nome"],
+            "Qtd": item["quantidade"],
+            "Preço Unitário": float(item["preco_unitario"]),
+            "Subtotal": float(item["quantidade"]) * float(item["preco_unitario"])
+        })
+    return pd.DataFrame(itens_formatados)
+
+# NOVA FUNÇÃO: Gerar o PDF com a Identidade Visual
+def gerar_pdf_comanda(comanda_id, mesa, total, data_fechamento, df_itens):
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # Cabeçalho - Identidade Visual (Azul #1D528A)
+    pdf.set_fill_color(29, 82, 138)
+    pdf.rect(0, 0, 210, 40, 'F')
+    
+    pdf.set_font("helvetica", "B", 24)
+    pdf.set_text_color(255, 255, 255) # Texto Branco
+    pdf.cell(0, 15, "LA VILA BISTRO", align="C", ln=1)
+    
+    pdf.set_font("helvetica", "", 12)
+    # Formatar data de forma simples (cortando os milissegundos)
+    data_formatada = str(data_fechamento)[:16].replace("T", " ") if data_fechamento else "Data não registrada"
+    pdf.cell(0, 10, f"Comanda #{comanda_id} | Mesa {mesa} | Data: {data_formatada}", align="C", ln=1)
+    
+    pdf.set_y(50)
+    pdf.set_text_color(10, 37, 64) # Texto Escuro para a tabela
+    
+    # Cabeçalho da Tabela
+    pdf.set_font("helvetica", "B", 10)
+    pdf.cell(110, 10, "Produto", border=1)
+    pdf.cell(20, 10, "Qtd", border=1, align="C")
+    pdf.cell(30, 10, "V. Unit (R$)", border=1, align="C")
+    pdf.cell(30, 10, "Subtotal (R$)", border=1, align="C", ln=1)
+    
+    # Linhas da Tabela
+    pdf.set_font("helvetica", "", 10)
+    for index, row in df_itens.iterrows():
+        # Limita o nome do produto para caber na célula
+        nome_prod = str(row["Produto"])[:50]
+        pdf.cell(110, 10, nome_prod, border=1)
+        pdf.cell(20, 10, str(row["Qtd"]), border=1, align="C")
+        pdf.cell(30, 10, f"{row['Preço Unitário']:.2f}", border=1, align="C")
+        pdf.cell(30, 10, f"{row['Subtotal']:.2f}", border=1, align="C", ln=1)
+    
+    # Rodapé com Total
+    pdf.ln(5)
+    pdf.set_font("helvetica", "B", 14)
+    pdf.cell(160, 15, "TOTAL GERAL:", align="R")
+    pdf.cell(30, 15, f"R$ {total:.2f}", align="R", ln=1)
+    
+    pdf.set_font("helvetica", "I", 10)
+    pdf.cell(0, 20, "Obrigado por escolher o La Vila Bistro!", align="C", ln=1)
+    
+    # Retorna os bytes do PDF para o Streamlit
+    return bytes(pdf.output())
 
 # --- Interface Gráfica ---
 st.title("🍽️ La Vila Bistrô")
@@ -130,17 +195,44 @@ with tab_estoque:
             st.success("Estoque atualizado!")
             st.rerun()
 
-# --- ABA 4: CAIXA ---
+# --- ABA 4: CAIXA --- (EVOLUÍDA COM EXIBIÇÃO DE ITENS E PDF)
 with tab_caixa:
     st.header("Controle de Caixa")
-    st.write("Visão geral das comandas fechadas.")
+    st.write("Visão detalhada das comandas fechadas e emissão de recibos.")
     
-    res_caixa = supabase.table("comandas").select("*").eq("status", "Fechada").execute()
+    # Busca comandas fechadas ordenando da mais recente para a mais antiga
+    res_caixa = supabase.table("comandas").select("*").eq("status", "Fechada").order("data_fechamento", desc=True).execute()
     df_caixa = pd.DataFrame(res_caixa.data)
     
     if not df_caixa.empty:
         faturamento_total = df_caixa['total'].sum()
         st.metric(label="Faturamento Total Acumulado", value=f"R$ {faturamento_total:.2f}")
-        st.dataframe(df_caixa[['id', 'mesa', 'total', 'data_fechamento']], use_container_width=True)
+        st.divider()
+        
+        st.subheader("Histórico de Comandas Fechadas")
+        for index, row in df_caixa.iterrows():
+            data_str = str(row['data_fechamento'])[:16].replace("T", " ") if row['data_fechamento'] else ""
+            
+            with st.expander(f"🧾 Comanda #{row['id']} - Mesa {row['mesa']} | Total: R$ {row['total']:.2f} | {data_str}"):
+                
+                # Busca os itens vinculados a esta comanda específica
+                df_itens_comanda = fetch_itens_comanda(row['id'])
+                
+                if not df_itens_comanda.empty:
+                    st.dataframe(df_itens_comanda, use_container_width=True, hide_index=True)
+                    
+                    # Gerar o arquivo PDF na memória
+                    pdf_bytes = gerar_pdf_comanda(row['id'], row['mesa'], row['total'], row['data_fechamento'], df_itens_comanda)
+                    
+                    # Botão para download do PDF
+                    st.download_button(
+                        label="📄 Baixar Recibo em PDF",
+                        data=pdf_bytes,
+                        file_name=f"LaVilaBistro_Comanda_{row['id']}.pdf",
+                        mime="application/pdf",
+                        key=f"pdf_btn_{row['id']}"
+                    )
+                else:
+                    st.warning("Nenhum item registrado nesta comanda (comanda vazia).")
     else:
         st.info("Nenhuma comanda fechada até o momento.")
