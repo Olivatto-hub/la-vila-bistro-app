@@ -4,6 +4,7 @@ from supabase import create_client, Client
 from fpdf import FPDF
 import plotly.express as px
 from datetime import datetime, timedelta
+import json
 
 # Configuração da Página
 st.set_page_config(page_title="La Vila Bistrô - Sistema", page_icon="🍽️", layout="wide")
@@ -20,6 +21,19 @@ try:
 except Exception as e:
     st.error("Erro ao conectar com o banco de dados. Verifique as credenciais no secrets.")
     st.stop()
+
+# ===========================================
+# ROTA DE HEALTH CHECK (KEEP-AWAKE)
+# ===========================================
+if "health" in st.query_params:
+    try:
+        # Ping ultraleve no Supabase para evitar pausa por inatividade do banco
+        supabase.table("produtos").select("id").limit(1).execute()
+        st.write(json.dumps({"status": "online", "db": "supabase_awake"}))
+    except Exception as e:
+        st.write(json.dumps({"status": "error", "details": str(e)}))
+    st.stop() # Interrompe o carregamento da interface gráfica pesada
+# ===========================================
 
 # --- Funções de Banco de Dados e BI ---
 def fetch_produtos():
