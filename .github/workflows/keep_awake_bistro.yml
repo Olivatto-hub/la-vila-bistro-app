@@ -14,9 +14,7 @@ jobs:
     steps:
       - name: Protocolo de Despertar (Sessao Real)
         run: |
-          # COLOQUE AQUI A URL DO APP DO BISTRÔ
-          URL_HEALTH="https://SEU-APP-DO-BISTRO.streamlit.app/?health=true"
-          
+          URL_HEALTH="https://la-vila-bistro-app-c6v986appv54clnyfkav5nm.streamlit.app/?health=true"
           MAX_RETRIES=10
           DELAY_BETWEEN_RETRIES=20
           USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
