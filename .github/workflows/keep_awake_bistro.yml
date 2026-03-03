@@ -1,0 +1,53 @@
+name: Keep Bistro Awake
+
+on:
+  schedule:
+    # Executa a cada 15 minutos
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping-server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    
+    steps:
+      - name: Protocolo de Despertar (Sessao Real)
+        run: |
+          # COLOQUE AQUI A URL DO APP DO BISTRÔ
+          URL_HEALTH="https://SEU-APP-DO-BISTRO.streamlit.app/?health=true"
+          
+          MAX_RETRIES=10
+          DELAY_BETWEEN_RETRIES=20
+          USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+          echo ">>> 🚀 Iniciando protocolo de manutenção de atividade para o Bistrô..."
+          
+          for ((i=1;i<=MAX_RETRIES;i++)); do
+            echo "---------------------------------------------------"
+            echo ">>> 🔄 Tentativa $i de $MAX_RETRIES..."
+            
+            # Suporte a cookies (-c e -b) e redirecionamentos (-L) para passar pela barreira do Streamlit
+            RAW_STATUS=$(curl -c cookies.txt -b cookies.txt -L -s -o /dev/null -w "%{http_code}" --max-time 30 -A "$USER_AGENT" "$URL_HEALTH" || echo "000")
+            
+            # Filtro matemático
+            STATUS="${RAW_STATUS: -3}"
+            if [ -z "$STATUS" ]; then STATUS="000"; fi
+            
+            echo ">>> Status bruto: $RAW_STATUS | Status filtrado: $STATUS"
+            
+            if [ "$STATUS" -eq 200 ]; then
+              echo ">>> ✅ SUCESSO! O servidor retornou 200 OK e o Supabase foi acionado."
+              exit 0
+            fi
+            
+            echo ">>> ⏳ Resposta $STATUS. O servidor pode estar inicializando no Cloud. Aguardando ${DELAY_BETWEEN_RETRIES}s..."
+            
+            if [ $i -lt $MAX_RETRIES ]; then
+              sleep $DELAY_BETWEEN_RETRIES
+            fi
+          done
+
+          echo "---------------------------------------------------"
+          echo ">>> ❌ FALHA CRÍTICA: O aplicativo não retornou 200 OK a tempo."
+          exit 1
