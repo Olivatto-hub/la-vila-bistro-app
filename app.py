@@ -38,7 +38,11 @@ if "health" in st.query_params:
 # --- Funções de Banco de Dados e BI ---
 def fetch_produtos():
     res = supabase.table("produtos").select("*").order("categoria").execute()
-    return pd.DataFrame(res.data)
+    df = pd.DataFrame(res.data)
+    # Se o banco retornar vazio, garantimos as colunas para evitar o KeyError
+    if df.empty:
+        return pd.DataFrame(columns=['id', 'categoria', 'nome', 'preco', 'estoque'])
+    return df
 
 def fetch_comandas_abertas():
     res = supabase.table("comandas").select("*").eq("status", "Aberta").execute()
