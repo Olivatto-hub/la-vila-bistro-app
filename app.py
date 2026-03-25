@@ -6,7 +6,7 @@ import plotly.express as px
 from datetime import datetime, timedelta
 
 # Configuração da Página
-st.set_page_config(page_title="La Vila Bistrô - Sistema", page_icon="🍽️", layout="wide")
+st.set_page_config(page_title="La Vila Bistrô - Sistema", layout="wide")
 
 # Conexão com Supabase
 @st.cache_resource
@@ -93,12 +93,9 @@ def gerar_pdf_comanda(comanda_id, mesa, total, data_fechamento, df_itens):
     pdf.cell(0, 20, "Obrigado por escolher o La Vila Bistro!", align="C", ln=1)
     return bytes(pdf.output())
 
-# --- NOVA FUNÇÃO: Gerar PDF de Instruções ---
 def gerar_pdf_instrucoes():
     pdf = FPDF()
     pdf.add_page()
-    
-    # Cabeçalho - Identidade Visual
     pdf.set_fill_color(29, 82, 138)
     pdf.rect(0, 0, 210, 40, 'F')
     pdf.set_font("helvetica", "B", 24)
@@ -106,11 +103,9 @@ def gerar_pdf_instrucoes():
     pdf.cell(0, 15, "LA VILA BISTRO", align="C", ln=1)
     pdf.set_font("helvetica", "", 14)
     pdf.cell(0, 10, "Manual de Operacao do Sistema", align="C", ln=1)
-    
     pdf.set_y(50)
     pdf.set_text_color(10, 37, 64)
     
-    # Conteúdo do Manual
     instrucoes = [
         ("1. Gestao de Comandas", "Para iniciar o atendimento, digite o numero da mesa e clique em 'Abrir Comanda'. Expanda a mesa desejada para lancar novos itens. O total e o estoque sao atualizados automaticamente. Ao finalizar, clique em 'Fechar Comanda' para enviar os dados ao Caixa."),
         ("2. Gerenciamento do Cardapio", "Utilize esta aba para cadastrar novos pratos ou bebidas. Defina a categoria, o nome (com especificacao de tamanho, se houver) e o preco. Tudo o que for cadastrado aqui aparecera automaticamente na tela de comandas."),
@@ -129,16 +124,15 @@ def gerar_pdf_instrucoes():
     pdf.ln(10)
     pdf.set_font("helvetica", "I", 10)
     pdf.cell(0, 10, "Documento gerado automaticamente pelo Sistema Gerencial La Vila Bistro.", align="C", ln=1)
-    
     return bytes(pdf.output())
 
 # --- Interface Gráfica ---
-st.title("🍽️ La Vila Bistrô")
+st.title("La Vila Bistrô")
 st.markdown("---")
 
-# EVOLUÇÃO: Adicionada a quinta aba de ajuda
+# Abas limpas, sem emojis, para evitar problemas de codificação no navegador/SO
 tab_comandas, tab_cardapio, tab_estoque, tab_caixa, tab_ajuda = st.tabs([
-    "📝 Comandas", "📖 Cardápio", "📦 Estoque", "💰 Caixa", "❓ Ajuda e Manual"
+    "Comandas", "Cardápio", "Estoque", "Caixa", "Ajuda e Manual"
 ])
 
 # --- ABA 1: COMANDAS ---
@@ -201,7 +195,7 @@ with tab_cardapio:
     st.header("Gerenciamento do Cardápio")
     df_produtos = fetch_produtos()
     
-    with st.expander("➕ Adicionar Novo Produto"):
+    with st.expander("Adicionar Novo Produto"):
         cat_nova = st.text_input("Categoria (Ex: Sucos, Prato Feito)")
         nome_novo = st.text_input("Nome do Produto")
         preco_novo = st.number_input("Preço (R$)", min_value=0.0, step=0.1, format="%.2f")
@@ -217,7 +211,7 @@ with tab_cardapio:
 with tab_estoque:
     st.header("Controle de Estoque e Análise Preditiva")
     
-    aba_movimentacao, aba_preditiva = st.tabs(["📦 Movimentar Estoque", "🔮 Previsão de Ruptura (IA)"])
+    aba_movimentacao, aba_preditiva = st.tabs(["Movimentar Estoque", "Previsão de Ruptura (IA)"])
     
     with aba_movimentacao:
         df_estoque = fetch_produtos()
@@ -262,10 +256,10 @@ with tab_estoque:
             
             criticos = df_analise[(df_analise['dias_autonomia'] <= 7) & (df_analise['dias_autonomia'] >= 0)].sort_values('dias_autonomia')
             if not criticos.empty:
-                st.error("🚨 **Atenção: Os produtos abaixo podem acabar nos próximos 7 dias!**")
+                st.error("Atenção: Os produtos abaixo podem acabar nos próximos 7 dias!")
                 st.dataframe(criticos[['nome', 'estoque', 'consumo_diario_medio', 'dias_autonomia']], use_container_width=True, hide_index=True)
             else:
-                st.success("✅ O estoque de todos os produtos está saudável no momento.")
+                st.success("O estoque de todos os produtos está saudável no momento.")
                 
             fig_est = px.bar(df_analise[df_analise['consumo_diario_medio'] > 0], x='nome', y='dias_autonomia', 
                              title="Dias Estimados de Estoque Restante por Produto", 
@@ -279,7 +273,7 @@ with tab_estoque:
 with tab_caixa:
     st.header("Inteligência Financeira e Caixa")
     
-    aba_dash, aba_historico = st.tabs(["📊 Dashboards de Desempenho", "🧾 Histórico de Recebimentos"])
+    aba_dash, aba_historico = st.tabs(["Dashboards de Desempenho", "Histórico de Recebimentos"])
     
     res_caixa = supabase.table("comandas").select("*").eq("status", "Fechada").order("data_fechamento", desc=True).execute()
     df_caixa = pd.DataFrame(res_caixa.data)
@@ -322,14 +316,14 @@ with tab_caixa:
                 baixa = vendas_agrup.tail(terco)['produto'].tolist()
                 media = vendas_agrup.iloc[terco:-terco]['produto'].tolist() if len(vendas_agrup) > 2 else []
                 
-                st.success(f"🔥 **Mais Vendidos (Alta Saída):** {', '.join(alta)}")
-                if media: st.info(f"⚖️ **Consumo Mediano:** {', '.join(media)}")
-                st.warning(f"❄️ **Pouca Saída:** {', '.join(baixa)}")
+                st.success(f"Mais Vendidos (Alta Saída): {', '.join(alta)}")
+                if media: st.info(f"Consumo Mediano: {', '.join(media)}")
+                st.warning(f"Pouca Saída: {', '.join(baixa)}")
                 
                 if produtos_sem_saida:
-                    st.error(f"🚫 **Sem Saída (Zero Vendas):** {', '.join(produtos_sem_saida)}")
+                    st.error(f"Sem Saída (Zero Vendas): {', '.join(produtos_sem_saida)}")
                 else:
-                    st.success("🎉 Excelente! Todos os produtos do cardápio já tiveram pelo menos uma venda registrada.")
+                    st.success("Excelente! Todos os produtos do cardápio já tiveram pelo menos uma venda registrada.")
         else:
             st.info("Nenhum dado financeiro para gerar painéis.")
 
@@ -339,14 +333,14 @@ with tab_caixa:
             for index, row in df_caixa.iterrows():
                 data_str = str(row['data_fechamento'])[:16].replace("T", " ") if row['data_fechamento'] else ""
                 
-                with st.expander(f"🧾 Comanda #{row['id']} - Mesa {row['mesa']} | Total: R$ {row['total']:.2f} | {data_str}"):
+                with st.expander(f"Comanda #{row['id']} - Mesa {row['mesa']} | Total: R$ {row['total']:.2f} | {data_str}"):
                     df_itens_comanda = fetch_itens_comanda(row['id'])
                     if not df_itens_comanda.empty:
                         st.dataframe(df_itens_comanda, use_container_width=True, hide_index=True)
                         st.info(f"**Total da Comanda:** R$ {row['total']:.2f}")
                         
                         pdf_bytes = gerar_pdf_comanda(row['id'], row['mesa'], row['total'], row['data_fechamento'], df_itens_comanda)
-                        st.download_button(label="📄 Baixar Recibo em PDF", data=pdf_bytes, file_name=f"LaVilaBistro_Comanda_{row['id']}.pdf", mime="application/pdf", key=f"pdf_btn_{row['id']}")
+                        st.download_button(label="Baixar Recibo em PDF", data=pdf_bytes, file_name=f"LaVilaBistro_Comanda_{row['id']}.pdf", mime="application/pdf", key=f"pdf_btn_{row['id']}")
                     else:
                         st.warning("Comanda vazia.")
         else:
@@ -360,27 +354,27 @@ with tab_ajuda:
     col_ajuda1, col_ajuda2 = st.columns([2, 1])
     
     with col_ajuda1:
-        with st.expander("📝 1. Gestão de Comandas", expanded=True):
+        # Menus limpos sem os emojis que causam quebra visual
+        with st.expander("1. Gestão de Comandas", expanded=True):
             st.write("Para iniciar o atendimento, digite o número da mesa e clique em **Abrir Comanda**. Expanda a mesa desejada para lançar novos itens. O total e o estoque são atualizados automaticamente. Ao finalizar, clique em **Fechar Comanda** para enviar os dados ao Caixa.")
         
-        with st.expander("📖 2. Gerenciamento do Cardápio"):
+        with st.expander("2. Gerenciamento do Cardápio"):
             st.write("Utilize esta aba para cadastrar novos pratos ou bebidas. Defina a categoria, o nome (com especificação de tamanho, se houver) e o preço. Tudo o que for cadastrado aqui aparecerá automaticamente na tela de comandas.")
         
-        with st.expander("📦 3. Controle e Movimentação de Estoque"):
+        with st.expander("3. Controle e Movimentação de Estoque"):
             st.write("Acompanhe o saldo atual de todos os produtos. Para dar entrada em mercadorias ou registrar uma perda, selecione o produto, escolha a direção da movimentação (Entrada ou Saída) e digite a quantidade.")
             st.write("**Inteligência Preditiva:** O sistema analisa o histórico de vendas para prever quando um produto vai acabar. Itens com menos de 7 dias de autonomia aparecerão destacados em vermelho.")
             
-        with st.expander("💰 4. Caixa e Dashboards"):
+        with st.expander("4. Caixa e Dashboards"):
             st.write("Verifique o faturamento do dia, da semana e do mês. Analise a Curva ABC para descobrir quais produtos vendem mais e quais estão parados no estoque. Aqui você também pode reimprimir ou baixar os recibos em PDF das comandas fechadas.")
 
     with col_ajuda2:
         st.info("Você pode baixar a versão completa deste manual em PDF para imprimir ou salvar no computador do caixa.")
         
-        # Gera o PDF do Manual e exibe o botão
         pdf_instrucoes_bytes = gerar_pdf_instrucoes()
         
         st.download_button(
-            label="📄 Baixar Manual em PDF",
+            label="Baixar Manual em PDF",
             data=pdf_instrucoes_bytes,
             file_name="LaVilaBistro_Manual.pdf",
             mime="application/pdf",
